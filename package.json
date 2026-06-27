@@ -1,0 +1,12 @@
+{
+    "name": "aether-node",
+    "version": "1.0.0",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "build": "exit 0"
+    },
+    "dependencies": {
+        "ws": "^8.16.0"
+    }
+}
