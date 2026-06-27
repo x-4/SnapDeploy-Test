@@ -1,5 +1,5 @@
 // ====================================================================
-// Aether Matrix Node (Node.js / PandaStack Ultimate Edition)
+// Void AI Matrix (SnapDeploy & PaaS Precision Fixed Edition)
 // ====================================================================
 
 const http = require('http');
@@ -8,21 +8,16 @@ const https = require('https');
 const { WebSocketServer } = require('ws');
 
 const ENV = {
-    S_TKN: process.env.UUID || '2523c510-9ff0-415b-9582-93949bfae7e3',
+    // 【修复1】加上 .trim()，彻底解决从面板复制粘贴带来的空格/换行符问题
+    S_TKN: (process.env.UUID || '2523c510-9ff0-415b-9582-93949bfae7e3').trim(),
     S_ORIGIN: 'https://www.microsoft.com',
-    // PandaStack 默认通过环境变量注入端口
-    PORT: process.env.PORT || 3000
+    PORT: process.env.PORT || 3000,
+    // 【修复2】将 VLESS 专用路径从根目录独立出来，绕过网关的根目录阻断
+    WS_PATH: '/stream'
 };
 
-// ====================================================================
-// 守护神盾：全局级崩溃防御 (防止容器因为脏数据意外重启)
-// ====================================================================
-process.on('uncaughtException', (err) => { /* 吞噬所有底层系统异常 */ });
-process.on('unhandledRejection', (reason) => { /* 吞噬所有 Promise 异常 */ });
-
-// ====================================================================
-// 调度注册表：黑盒化核心逻辑 (Anti-Static Analysis)
-// ====================================================================
+process.on('uncaughtException', (err) => console.error('[System] Uncaught Exception:', err.message));
+process.on('unhandledRejection', (reason) => console.error('[System] Unhandled Rejection:', reason));
 
 const Registry = new Map();
 
@@ -49,7 +44,6 @@ Registry.set('resolve', (type, buf) => {
     if (type === 3) return buf.toString('utf8');
     const ipv6 = [];
     for (let i = 0; i < 8; i++) ipv6.push(((buf[i * 2] << 8) | buf[i * 2 + 1]).toString(16));
-    // 兼容 Node.js 原生 API，去除 IPv6 的中括号
     return ipv6.join(':');
 });
 
@@ -68,10 +62,6 @@ Registry.set('parse', (buf) => {
     return { prot, type, port, clusterId: buf.subarray(aOff, pOff), pOff };
 });
 
-// ====================================================================
-// 好莱坞级 AI 控制台界面 (前端视觉欺骗)
-// ====================================================================
-
 const renderAIMatrix = (res) => {
     const html = `
     <!DOCTYPE html>
@@ -81,127 +71,22 @@ const renderAIMatrix = (res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>LLM Edge Tensor Node</title>
         <script src="https://cdn.tailwindcss.com"></script>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-            body { background: #050505; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; overflow-x: hidden; }
+            body { background: #050505; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; }
             .grid-bg { background-image: linear-gradient(rgba(25, 25, 30, 0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(25, 25, 30, 0.5) 1px, transparent 1px); background-size: 30px 30px; }
-            .glass { background: rgba(15, 20, 25, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.05); }
             .glow-text { text-shadow: 0 0 10px rgba(56, 189, 248, 0.6); }
-            .terminal { max-height: 250px; overflow-y: auto; font-size: 0.85rem; }
-            ::-webkit-scrollbar { width: 6px; }
-            ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
         </style>
     </head>
-    <body class="grid-bg min-h-screen p-6 md:p-12">
-        <div class="max-w-7xl mx-auto">
-            <header class="flex justify-between items-end mb-10 border-b border-gray-800 pb-4">
-                <div>
-                    <h1 class="text-3xl font-bold text-sky-400 glow-text tracking-wider">AETHER<span class="text-white">_NODE</span></h1>
-                    <p class="text-gray-500 text-sm mt-1">Distributed Tensor Inference Cluster</p>
-                </div>
-                <div class="flex items-center gap-3">
-                    <span class="relative flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>
-                    <span class="text-emerald-500 text-sm font-bold tracking-widest">LIVE</span>
-                </div>
-            </header>
-
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                <div class="glass p-5 rounded-lg border-l-4 border-l-sky-500">
-                    <p class="text-gray-500 text-xs mb-1">GPU VRAM USAGE</p>
-                    <div class="text-2xl font-bold text-sky-400" id="vram">-- GB</div>
-                </div>
-                <div class="glass p-5 rounded-lg border-l-4 border-l-indigo-500">
-                    <p class="text-gray-500 text-xs mb-1">TOKENS / SEC</p>
-                    <div class="text-2xl font-bold text-indigo-400" id="tps">--</div>
-                </div>
-                <div class="glass p-5 rounded-lg border-l-4 border-l-rose-500">
-                    <p class="text-gray-500 text-xs mb-1">INFERENCE LATENCY</p>
-                    <div class="text-2xl font-bold text-rose-400" id="latency">-- ms</div>
-                </div>
-                <div class="glass p-5 rounded-lg border-l-4 border-l-amber-500">
-                    <p class="text-gray-500 text-xs mb-1">ACTIVE STREAMS</p>
-                    <div class="text-2xl font-bold text-amber-400" id="streams">--</div>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-2 glass p-6 rounded-lg relative h-80">
-                    <p class="absolute top-4 left-6 text-xs text-gray-500 z-10">REAL-TIME TENSOR THROUGHPUT</p>
-                    <canvas id="mainChart"></canvas>
-                </div>
-                <div class="glass p-6 rounded-lg flex flex-col">
-                    <p class="text-xs text-gray-500 mb-4 border-b border-gray-800 pb-2">CLUSTER EVENT LOGS</p>
-                    <div class="terminal flex-1 text-gray-400" id="terminal">
-                        <div class="text-sky-500">>> INITIALIZING AETHER ENGINE v5.0...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <script>
-            const ctx = document.getElementById('mainChart').getContext('2d');
-            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-            gradient.addColorStop(0, 'rgba(56, 189, 248, 0.4)');
-            gradient.addColorStop(1, 'rgba(56, 189, 248, 0)');
-
-            const chart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: Array(30).fill(''),
-                    datasets: [{
-                        data: Array(30).fill(50),
-                        borderColor: '#38bdf8', borderWidth: 2, backgroundColor: gradient,
-                        fill: true, pointRadius: 0, tension: 0.3
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { display: false, min: 0, max: 200 }, x: { display: false } }, plugins: { legend: { display: false } } }
-            });
-
-            const logs = [
-                "Allocating 4096MB VRAM for transformer blocks...",
-                "KV cache synced across distributed micro-VMs.",
-                "Attention mechanism optimized: FlashAttention-2 active.",
-                "Inference stream connection established.",
-                "Garbage collection executed. Freed 120MB.",
-                "Received embedding vector [dim=8192]. Processing...",
-                "Router: Forwarding request to GPU worker 02.",
-                "CUDA Core temperature stable at 68°C."
-            ];
-
-            const term = document.getElementById('terminal');
-            
-            setInterval(() => {
-                document.getElementById('vram').innerText = (Math.random() * 2 + 14).toFixed(1) + ' GB';
-                document.getElementById('tps').innerText = Math.floor(Math.random() * 50 + 150);
-                document.getElementById('latency').innerText = Math.floor(Math.random() * 20 + 35) + ' ms';
-                document.getElementById('streams').innerText = Math.floor(Math.random() * 5 + 12);
-                
-                const nextVal = chart.data.datasets[0].data[29] + (Math.random() * 40 - 20);
-                const safeVal = Math.max(20, Math.min(180, nextVal));
-                chart.data.datasets[0].data.push(safeVal);
-                chart.data.datasets[0].data.shift();
-                chart.update();
-
-                if(Math.random() > 0.6) {
-                    const log = document.createElement('div');
-                    const time = new Date().toISOString().split('T')[1].slice(0,-1);
-                    log.innerHTML = \`<span class="text-gray-600">[\${time}]</span> \${logs[Math.floor(Math.random()*logs.length)]}\`;
-                    term.appendChild(log);
-                    term.scrollTop = term.scrollHeight;
-                }
-            }, 800);
-        </script>
+    <body class="grid-bg min-h-screen p-12 flex flex-col items-center justify-center">
+        <h1 class="text-5xl font-bold text-sky-400 glow-text mb-4">AETHER<span class="text-white">_NODE</span></h1>
+        <p class="text-gray-500">Distributed Inference Engine [Status: ONLINE]</p>
     </body>
     </html>
     `;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(html);
 };
-
-// ====================================================================
-// 路由代理与配置分发引擎
-// ====================================================================
 
 const mirrorOrigin = (req, res) => {
     const options = {
@@ -219,8 +104,9 @@ const mirrorOrigin = (req, res) => {
 
 const generateSubscription = (req, res) => {
     const host = req.headers.host;
-    const tag = encodeURIComponent('PandaStack-Node');
-    const tB64 = "dmxlc3M6Ly97aWR9QHtob3N0fTo0NDM/ZW5jcnlwdGlvbj1ub25lJnNlY3VyaXR5PXRscyZzbmk9e2hvc3R9JmZwPWNocm9tZSZ0eXBlPXdzJmhvc3Q9e2hvc3R9JnBhdGg9JTJGI3t0YWd9";
+    const tag = encodeURIComponent('SnapDeploy-Node');
+    // 【修复2配套】订阅链接的 Path 修改为独立的 /stream
+    const tB64 = "dmxlc3M6Ly97aWR9QHtob3N0fTo0NDM/ZW5jcnlwdGlvbj1ub25lJnNlY3VyaXR5PXRscyZzbmk9e2hvc3R9JmZwPWNocm9tZSZ0eXBlPXdzJmhvc3Q9e2hvc3R9JnBhdGg9JTJGc3RyZWFtI3t0YWd9";
     const link = Buffer.from(tB64, 'base64').toString('utf8').replace('{id}', ENV.S_TKN).replace(/{host}/g, host).replace('{tag}', tag);
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(Buffer.from(link).toString('base64'));
@@ -229,7 +115,6 @@ const generateSubscription = (req, res) => {
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
-    // 云原生就绪探针支持 (防止容器平台误杀)
     if (req.method === 'GET' && ['/health', '/healthz', '/livez'].includes(url.pathname)) {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         return res.end('OK');
@@ -238,7 +123,6 @@ const server = http.createServer((req, res) => {
     if (req.method === 'GET' && url.pathname === '/' + ENV.S_TKN) return generateSubscription(req, res);
     if (req.method === 'GET' && url.pathname === '/') return renderAIMatrix(res);
 
-    // 概率性混淆故障 (Anti-Pattern: 仅针对非法流量)
     const op = Math.random();
     if (op < 0.05) { res.writeHead(503); return res.end('Service Unavailable'); }
     if (op < 0.1) { res.writeHead(403); return res.end('Forbidden'); }
@@ -247,13 +131,28 @@ const server = http.createServer((req, res) => {
 });
 
 // ====================================================================
-// WebSocket 极速核心引擎 (TCP原生透传 + 高可用DoH)
+// WebSocket 引擎
 // ====================================================================
 
-const wss = new WebSocketServer({ noServer: true });
+// 【修复3】配置 handleProtocols：如果客户端 V2ray 携带了 Sec-WebSocket-Protocol 进行伪装，必须原封不动回传！
+const wss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) => {
+        return protocols[0] || false;
+    }
+});
+
 const DOH_ENDPOINTS = ['aHR0cHM6Ly8xLjEuMS4xL2Rucy1xdWVyeQ==', 'aHR0cHM6Ly9kbnMuZ29vZ2xlL2Rucy1xdWVyeQ==', 'aHR0cHM6Ly85LjkuOS45L2Rucy1xdWVyeQ=='].map(b64 => Buffer.from(b64, 'base64').toString('utf8'));
 
 server.on('upgrade', (request, socket, head) => {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+
+    // 【修复2配套】只有访问专属的 /stream 路径，才允许建立 WebSocket，极大增强隐蔽性和防拦截能力
+    if (url.pathname !== ENV.WS_PATH) {
+        socket.destroy();
+        return;
+    }
+
     wss.handleUpgrade(request, socket, head, ws => { wss.emit('connection', ws); });
 });
 
@@ -299,12 +198,11 @@ wss.on('connection', ws => {
             const meta = Registry.get('parse')(msg);
 
             if (!meta) {
-                // 抗时序攻击：伪装真实鉴权延迟后断开
+                console.log('[Auth] Invalid Payload. Closing WS.');
                 setTimeout(() => ws.close(), Math.random() * 300 + 50);
                 return;
             }
 
-            // 严格遵从 VLESS 握手协议，不再注入干扰乱码
             ws.send(Buffer.from([msg[0], 0]));
 
             const initialPayload = msg.subarray(meta.pOff);
@@ -319,18 +217,20 @@ wss.on('connection', ws => {
 
             const host = Registry.get('resolve')(meta.type, meta.clusterId);
 
-            // 原生 TCP 管道建立 (底层 C++ Socket，零拷贝极速转发)
             edgeSocket = net.createConnection({ host: host, port: meta.port }, () => {
                 if (initialPayload.length > 0) edgeSocket.write(initialPayload);
             });
 
             edgeSocket.on('data', chunk => { if (ws.readyState === ws.OPEN) ws.send(chunk); });
-            edgeSocket.on('error', () => ws.close());
+            edgeSocket.on('error', (err) => {
+                // 【诊断功能】如果在 SnapDeploy 后台看到这里的报错，说明平台封锁了出站 TCP
+                console.error(`[TCP Outbound Error] -> ${host}:${meta.port} | Msg: ${err.message}`);
+                ws.close();
+            });
             edgeSocket.on('close', () => ws.close());
         } else {
             if (isUDP) {
                 udpBuffer = Buffer.concat([udpBuffer, msg]);
-                // 内存溢出保护：防止恶意客户端持续发包导致 OOM 崩溃
                 if (udpBuffer.length > 65536) { ws.close(); return; }
                 processUDP();
             } else {
@@ -339,16 +239,10 @@ wss.on('connection', ws => {
         }
     });
 
-    // 严密的内存回收与生命周期管理
     ws.on('close', () => { if (edgeSocket) edgeSocket.destroy(); });
     ws.on('error', () => { if (edgeSocket) edgeSocket.destroy(); });
 });
 
-// ====================================================================
-// 系统点火启动 (无保活，遵循云原生生命周期)
-// ====================================================================
-
 server.listen(ENV.PORT, () => {
-    console.log(`[SYSTEM] Aether Matrix Core initialized. Listening on port ${ENV.PORT}`);
-    console.log(`[SYSTEM] Hibernation Engine: ENABLED (No Keep-Alive)`);
+    console.log(`[SYSTEM] Aether Matrix Engine ONLINE | Port: ${ENV.PORT} | Path: ${ENV.WS_PATH}`);
 });
